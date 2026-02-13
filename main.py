@@ -39,7 +39,7 @@ retriever = vectorstore.as_retriever()
 
 # 3. Gemini 설정 (여기에 발급받은 키를 넣으세요)
 os.environ["GOOGLE_API_KEY"] = google_api_key  # 본인의 Google API 키로 변경
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.7)  # 모델과 온도 설정  
 
 # 4. RAG 체인 구성
 prompt = ChatPromptTemplate.from_template("""
