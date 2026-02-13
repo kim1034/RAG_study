@@ -2,6 +2,20 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 google_api_key = os.getenv("GOOGLE_API_KEY")
+# 1. .env 파일 로드 시도 및 결과 확인
+if not load_dotenv():
+    print("경고: .env 파일을 찾을 수 없습니다. 경로를 확인하세요.")
+
+# 2. 키 가져오기
+google_api_key = os.getenv("GOOGLE_API_KEY")
+
+# 3. 키가 제대로 로드되었는지 체크
+if google_api_key is None:
+    raise ValueError("GOOGLE_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
+
+# 환경변수에 할당 (이제 문자열임이 보장됨)
+os.environ["GOOGLE_API_KEY"] = google_api_key
+
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -24,7 +38,7 @@ vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
 retriever = vectorstore.as_retriever()
 
 # 3. Gemini 설정 (여기에 발급받은 키를 넣으세요)
-os.environ["GOOGLE_API_KEY"] = "AIzaSyBKq8GkVmfowZ1MywJK63sLIGo20hk6Dfg"  # 본인의 Google API 키로 변경
+os.environ["GOOGLE_API_KEY"] = google_api_key  # 본인의 Google API 키로 변경
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash") # 무료로 쓰기 좋은 성능의 모델
 
 # 4. RAG 체인 구성
