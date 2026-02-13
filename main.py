@@ -1,72 +1,61 @@
 import os
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
-# 1. 문서 로드 경로 설정
-# PDF를 사용한다면 PyPDFLoader, 텍스트 파일이면 TextLoader를 사용합니다.
-file_path = "study_data.pdf" 
-
-if file_path.endswith(".pdf"):
-    loader = PyPDFLoader(file_path)
-elif file_path.endswith(".txt"):
-    loader = TextLoader(file_path)
-
-# 2. 문서 읽기
+# 1. 문서 로드 (기존과 동일)
+file_path = "study_data.pdf"
+loader = PyPDFLoader(file_path) if file_path.endswith(".pdf") else TextLoader(file_path)
 documents = loader.load()
 
-# 3. 결과 확인 (첫 페이지 내용만 살짝 출력)
-print(f"문서를 성공적으로 불러왔습니다. 총 {len(documents)}페이지가 로드되었습니다.")
-print("--- 첫 페이지 내용 미리보기 ---")
-print(documents[0].page_content[:200]) # 앞 200자만 출력
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-# 1. 분할기 설정 (한 청크당 500자, 50자씩 겹치게)
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=50
-)
-
-# 2. 문서 분할 실행
+# 2. 텍스트 분할
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 splits = text_splitter.split_documents(documents)
 
-# 3. 결과 확인
-print(f"분할 완료! 전체 문서를 {len(splits)}개의 청크로 나누었습니다.")
-print("-" * 30)
-print(f"첫 번째 청크 내용:\n{splits[0].page_content}")
+# 3. 임베딩 및 벡터 저장소
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-miniLm-l6-v2")
+vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
+retriever = vectorstore.as_retriever()
 
+# 4. LLM 설정 (본인의 API 키를 입력하세요)
+os.environ["OPENAI_API_KEY"] = "your-api-key-here"
+llm = ChatOpenAI(model="gpt-4o")
 
-### 4단계 ###
+# 5. RAG 전용 프롬프트 설정
+template = """가져온 문맥(context)을 사용하여 질문에 답하세요. 
+답을 모른다면 모른다고 말하고 추측하지 마세요. 
+최대한 친절하게 한글로 답변하세요.
 
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+#Context:
+{context}
 
-# 1. 임베딩 모델 설정 (무료 오픈소스 모델 사용)
-# 'sentence-transformers/all-MiniLM-L6-v2'는 작고 빠르며 성능이 준수합니다.
-model_name = "sentence-transformers/all-miniLm-l6-v2"
-model_kwargs = {'device': 'cpu'} # GPU가 있다면 'cuda'로 변경 가능
-encode_kwargs = {'normalize_embeddings': False}
+#Question:
+{question}
 
-embeddings = HuggingFaceEmbeddings(
-    model_name=model_name,
-    model_kwargs=model_kwargs,
-    encode_kwargs=encode_kwargs
+#Answer:"""
+
+prompt = ChatPromptTemplate.from_template(template)
+
+# 6. RAG 체인 생성 (LCEL 방식 - chains 모듈 불필요)
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+rag_chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt
+    | llm
+    | StrOutputParser()
 )
 
-# 2. 벡터 저장소 생성 및 데이터 저장
-# splits: 이전 단계에서 쪼갠 텍스트 뭉치
-# embeddings: 방금 설정한 숫자로 바꾸는 도구
-# persist_directory: 데이터를 저장할 경로 (폴더가 생성됩니다)
-db = Chroma.from_documents(
-    documents=splits, 
-    embedding=embeddings,
-    persist_directory="./chroma_db" 
-)
-
-print("벡터 저장소 구축이 완료되었습니다!")
-
-# 3. 간단한 검색 테스트
-query = "문서에서 가장 중요한 내용은?" # 문서에 있을 법한 질문을 던져보세요
-docs = db.similarity_search(query)
-
-print("\n--- 검색 결과 (가장 유사한 문서 조각) ---")
-print(docs[0].page_content)
+# 7. 실행
+print("\n" + "="*50)
+query = "지원 내용에는 어떤 것들이 포함되어 있나요?"
+response = rag_chain.invoke(query)
+print(f"질문: {query}")
+print(f"답변: {response}")
+print("="*50)
